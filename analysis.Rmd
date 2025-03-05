@@ -157,7 +157,7 @@ p_bp_income <- ggplot(df_preds, aes(y = ypred, x = combined_income, fill = count
   geom_line(aes(col = country), linewidth = 1) +
   geom_ribbon(aes(ymin = ypred_lo, ymax = ypred_hi), alpha = 0.40) + 
   xlab('Income group') +
-  ylab('Behavioral plasticity') +
+  ylab('Perceived behavioral plasticity') +
   scale_x_continuous(breaks = c(seq(1, 15, 3), 15), limits = c(1, 15)) +
   scale_y_continuous(breaks = seq(1, 5), limits = c(1, 5)) +
   scale_color_manual(values = country_colors) +
@@ -284,7 +284,7 @@ p_matching <- ggplot(df_preds, aes(x = bp_value, y = ypred, fill = income_bracke
   ) +
   geom_line(aes(col = income_bracket), linewidth = 1) +
   geom_ribbon(aes(ymin = ypred_lo, ymax = ypred_hi), alpha = 0.40, show.legend = FALSE) + 
-  xlab('Behavioral plasticity') +
+  xlab('Perceived behavioral plasticity') +
   ylab('Policy support') +
   facet_wrap(~ full_name + country, ncol = 4) +
   scale_y_continuous(breaks = seq(1, 7, 1)) +
@@ -484,11 +484,83 @@ p_both <- ggplot(df_both, aes(x = prop, y = full_name, fill = country, col = cou
     plot.title = element_text(size = 14, hjust = 0.50)
   )
 
-ggsave('Figures/FigureEx1.pdf', p_both, width = 9, height = 8)
+ggsave('Figures/FigureED1.pdf', p_both, width = 9, height = 8)
 p_both
 ```
 
-## Figure ED2: Already did the action across income groups
+## Figure ED2: Already did and behavioral plasticity
+Visualize relationship between exclusion rate and mean plasticity rating for behaviors across countries.
+
+```{r, fig.height = 8}
+df_mean <- df %>%
+  select(country, varnames) %>%
+  pivot_longer(-country) %>% 
+  na.omit() %>% 
+  group_by(country, name) %>% 
+  summarize(
+    mean_bp = mean(value),
+    sd_bp = sd(value),
+    se_bp = sd_bp / sqrt(n())
+  ) %>% 
+  mutate(
+    full_name = factor(
+      wrap_label_vectorized(map_names[name]),
+      levels = wrap_label_vectorized(actions_order)
+    )
+  )
+
+df_mean_exclusion <- df_mean %>% 
+  left_join(
+    df_both %>%
+      filter(type == 'Already did / Never do it') %>% 
+      mutate(
+        name = str_extract(name, "^[^_]+_[^_]+")
+      ) %>% 
+      select(country, name, prop, prop_se)
+    , by = c('country', 'name')
+  ) %>% 
+  mutate(
+    full_name = factor(
+      wrap_label_vectorized(map_names[name]),
+      levels = rev(wrap_label_vectorized(actions_order))
+    )
+  )
+  
+cols <- brewer.pal(10, 'Set3')
+p_mean_exclusion <- ggplot(df_mean_exclusion, aes(x = prop, y = mean_bp, col = full_name)) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(ymin = mean_bp - 1.96 * se_bp, ymax = mean_bp + 1.96 * se_bp),
+    width = 0.01
+  ) +
+  # Horizontal error bars
+  geom_errorbarh(
+    aes(xmin = prop - 1.96 * prop_se, xmax = prop + 1.96 * prop_se),
+    height = 0.1
+  ) +
+  facet_wrap(~ country) +
+  labs(
+    x = 'Proportion: Already do / never do it',
+    y = 'Mean perceived behavioral plasticity'
+  ) +
+  scale_color_manual(name = '', values = cols) +
+  scale_x_continuous(breaks = seq(0, 0.3, 0.05)) +
+  scale_y_continuous(breaks = seq(1, 5, 1), limits = c(1, 5)) +
+  theme_minimal() +
+  theme(
+    legend.position = 'top',
+    strip.text = element_text(size = 14),
+    plot.title = element_text(hjust = 0.50, size = 14),
+    axis.text.y = element_text(size = 10),
+    legend.key.spacing = unit(0.10, 'cm')
+  ) +
+  guides(color = guide_legend(nrow = 5, reverse = TRUE))
+
+ggsave('Figures/FigureED2.pdf', p_mean_exclusion, width = 7, height = 7)
+p_mean_exclusion
+```
+
+## Figure ED3: Already did the action across income groups
 ```{r}
 df_prep <- df %>%
   select(country, combined_income, varnames_peb) %>%
@@ -590,7 +662,7 @@ p_selection <- ggplot(
     plot.title = element_text(size = 14, hjust = 0.50)
   )
 
-ggsave('Figures/FigureEx2.pdf', p_selection, width = 9, height = 7)
+ggsave('Figures/FigureEx3.pdf', p_selection, width = 9, height = 7)
 p_selection
 ```
 
@@ -620,20 +692,26 @@ pander(df_bfs %>% select(country, full_name, log_bf))
 Here we visualize mean behavioral plasticity across all countries.
 
 ```{r}
-df_mean_beh <- df %>%
+df_mean_sd_beh <- df %>%
   select(country, varnames) %>%
   pivot_longer(-country) %>% 
   na.omit() %>% 
   mutate(curtailment = as.numeric(grepl('curtailment', name))) %>% 
-  group_by(country) %>% 
+  group_by(country, name) %>% 
   summarize(
     mean_bp = mean(value),
     sd_bp = sd(value),
     n = n(),
     se_bp = sd_bp / sqrt(n)
+  ) %>% 
+  # Compute the mean of the mean /sd behavioral plasticity of behaviors
+  group_by(country) %>% 
+  summarize(
+    mean_bp = mean(mean_bp),
+    sd_bp = mean(sd_bp)
   )
 
-pander(df_mean_beh)
+pander(df_mean_sd_beh)
 ```
 
 ```{r}
@@ -646,7 +724,8 @@ df_mean <- df %>%
     mean_bp = mean(value),
     sd_bp = sd(value),
     n = n(),
-    se_bp = sd_bp / sqrt(n)
+    se_bp = sd_bp / sqrt(n),
+    se_sd_bp = sd_bp / sqrt(2 * n)
   ) %>% 
   mutate(
     full_name = factor(
@@ -664,7 +743,7 @@ p_mean <- ggplot(df_mean, aes(x = mean_bp, y = country, color = country)) +
   ) +
   facet_wrap(~ full_name, nrow = 2) +
   ylab('') +
-  xlab('Mean Behavioral plasticity') +
+  xlab('Mean perceived behavioral plasticity') +
   scale_x_continuous(breaks = seq(1, 5, 1), limits = c(1, 5)) +
   scale_color_manual(values = country_colors) +
   coord_flip() +
@@ -682,7 +761,36 @@ ggsave('Figures/FigureS1.pdf', p_mean, width = 9, height = 7)
 p_mean
 ```
 
-## Figure S2: Mean policy support across countries
+## Figure S1: Standard deviation of behavioral plasticity across countries
+```{r}
+pwidth <- 0.91
+p_sd <- ggplot(df_mean, aes(x = sd_bp, y = country, color = country)) +
+  geom_point(position = position_dodge(width = pwidth)) +
+  geom_errorbar(
+    aes(xmin = sd_bp - 1.96 * se_sd_bp, xmax = sd_bp + 1.96 * se_sd_bp),
+    position = position_dodge(width = pwidth), width = 0.30
+  ) +
+  facet_wrap(~ full_name, nrow = 2) +
+  ylab('') +
+  xlab('Standard deviation of perceived behavioral plasticity') +
+  scale_x_continuous(breaks = seq(0, 2, 0.50), limits = c(0, 2)) +
+  scale_color_manual(values = country_colors) +
+  coord_flip() +
+  theme_minimal() +
+  theme(
+    legend.position = 'top',
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 90),
+    strip.text = element_text(size = 7),
+    panel.grid.major.x = element_blank(),
+    plot.title = element_text(size = 14, hjust = 0.50)
+  )
+
+ggsave('Figures/FigureS2.pdf', p_sd, width = 9, height = 7)
+p_sd
+```
+
+## Figure S3: Mean policy support across countries
 Here we visualize mean policy support across all countries.
 
 ```{r}
@@ -731,11 +839,11 @@ p_mean_ps <- ggplot(df_mean_ps, aes(x = mean_ps, y = country, color = country)) 
     plot.title = element_text(size = 14, hjust = 0.50)
   )
 
-ggsave('Figures/FigureS2.pdf', p_mean_ps, width = 9, height = 8)
+ggsave('Figures/FigureS3.pdf', p_mean_ps, width = 9, height = 8)
 p_mean_ps
 ```
 
-## Figure S3: Differences in high and low income groups
+## Figure S4: Differences in high and low income groups
 Here we visualize the differences in mean behavioral plasticity between the top 10% income earners and the rest.
 
 ```{r}
@@ -765,7 +873,7 @@ p_estimates <- ggplot(df_diffs, aes(x = mean_diff, y = country, color = full_nam
   theme_minimal() +
   scale_color_manual(name = '', values = cols) +
   labs(
-    x = 'Mean difference in behavioral plasticity',
+    x = 'Mean difference in perceived behavioral plasticity',
     y = ''
   ) +
   theme(
@@ -777,11 +885,11 @@ p_estimates <- ggplot(df_diffs, aes(x = mean_diff, y = country, color = full_nam
   ) +
   guides(color = guide_legend(nrow = 5, reverse = TRUE))
 
-ggsave('Figures/FigureS3.pdf', p_estimates, width = 8, height = 10)
+ggsave('Figures/FigureS4.pdf', p_estimates, width = 8, height = 10)
 p_estimates
 ```
 
-## Figures S4 & S5: Sensitivity analysis I
+## Figures S5 & S6: Sensitivity analysis I
 We assess how sensitive the results are to changes in the prior width of the income effect and the interaction of income and country.
 
 ```{r}
@@ -833,7 +941,7 @@ p_sens_fig2_income <- ggplot(df_inclusion_bfs_sens, aes(x = rscaleCont, y = (inc
   )
 
 ggsave(
-  'Figures/FigureS4.pdf',
+  'Figures/FigureS5.pdf',
   p_sens_fig2_income,
   width = 10, height = 5
 )
@@ -862,14 +970,14 @@ p_sens_fig2_income_country <- ggplot(
   )
 
 ggsave(
-  'Figures/FigureS5.pdf',
+  'Figures/FigureS6.pdf',
   p_sens_fig2_income_country,
   width = 10, height = 5
 )
 p_sens_fig2_income_country
 ```
 
-## Figure S6: Sensitivity analysis II
+## Figure S7: Sensitivity analysis II
 We run sensitivity analyses for the results reported in Figure 3.
 
 ```{r}
@@ -972,7 +1080,7 @@ p_sens_fig3 <- ggplot(
   )
 
 ggsave(
-  'Figures/FigureS6.pdf',
+  'Figures/FigureS7.pdf',
   p_sens_fig3,
   width = 8, height = 8
 )
@@ -980,7 +1088,7 @@ p_sens_fig3
 ```
 
 
-## Figures S7 & S8: More loosely domain-matched analyses
+## Figures S8 & S9: More loosely domain-matched analyses
 We estimate the relationship between more loosely domain-matched policies and behavioral plasticity items.
 
 ```{r}
@@ -1125,7 +1233,7 @@ p_investment_loose <- ggplot(
   ) +
   geom_line(aes(col = income_bracket), linewidth = 1) +
   geom_ribbon(aes(ymin = ypred_lo, ymax = ypred_hi), alpha = 0.40, show.legend = FALSE) + 
-  xlab('Behavioral plasticity') +
+  xlab('Perceived behavioral plasticity') +
   ylab('Policy support') +
   facet_wrap(~ full_name + country, ncol = 4) +
   scale_color_manual(values = matching_colors) +
@@ -1163,16 +1271,16 @@ p_curtailment_loose <- ggplot(
   ) +
   guides(color = guide_legend(title = 'Income bracket'))
 
-ggsave('Figures/FigureS7.pdf', p_curtailment_loose, width = 9, height = 10)
+ggsave('Figures/FigureS8.pdf', p_curtailment_loose, width = 9, height = 10)
 p_curtailment_loose
 ```
 
 ```{r, fig.height = 10}
-ggsave('Figures/FigureS8.pdf', p_investment_loose, width = 9, height = 10)
+ggsave('Figures/FigureS9.pdf', p_investment_loose, width = 9, height = 10)
 p_investment_loose
 ```
 
-## Figure S9: Mean behavioral plasticy and mean policy support
+## Figure S10: Mean behavioral plasticy and mean policy support
 We run the model for mean support across all policies and mean of all behavioral plasticity items.
 
 ```{r, fig.height = 4}
@@ -1228,7 +1336,7 @@ p_mean_matched <- ggplot(df_both, aes(x = bp_value, y = ypred, fill = income_bra
   geom_line(data = df_preds_avg, aes(col = income_bracket), linewidth = 1) +
   geom_ribbon(data = df_preds_avg, aes(ymin = ypred_lo, ymax = ypred_hi), alpha = 0.40, show.legend = FALSE) + 
   scale_y_continuous(breaks = seq(1, 7, 1), limits = c(0.9, 7.2)) +
-  xlab('Mean behavioral plasticity') +
+  xlab('Mean perceived behavioral plasticity') +
   ylab('Mean policy support') +
   facet_wrap(~ country, ncol = 4) +
   scale_color_manual(values = matching_colors) +
@@ -1242,11 +1350,11 @@ p_mean_matched <- ggplot(df_both, aes(x = bp_value, y = ypred, fill = income_bra
   ) +
   guides(color = guide_legend(title = 'Income bracket'))
 
-ggsave('Figures/FigureS9.pdf', p_mean_matched, width = 9, height = 4)
+ggsave('Figures/FigureS10.pdf', p_mean_matched, width = 9, height = 4)
 p_mean_matched
 ```
 
-## Supplementary Figures 10 - 13: Correlation plots
+## Supplementary Figures 11 - 14: Correlation plots
 We calculate Kendall's correlation coefficients.
 
 ```{r}
@@ -1264,7 +1372,7 @@ res_usa <- get_cors_all(df_cors, labels, 'United States')
 
 ### Denmark
 ```{r, fig.width = 10, fig.height = 10}
-pdf('Figures/FigureS10.pdf', width = 10, height = 10)
+pdf('Figures/FigureS11.pdf', width = 10, height = 10)
 get_corrplot_all(res_denmark)
 dev.off()
 get_corrplot_all(res_denmark)
@@ -1272,7 +1380,7 @@ get_corrplot_all(res_denmark)
 
 ### United States
 ```{r, fig.width = 10, fig.height = 10}
-pdf('Figures/FigureS11.pdf', width = 10, height = 10)
+pdf('Figures/FigureS12.pdf', width = 10, height = 10)
 get_corrplot_all(res_usa)
 dev.off()
 get_corrplot_all(res_usa)
@@ -1280,7 +1388,7 @@ get_corrplot_all(res_usa)
 
 ### Nigeria
 ```{r, fig.width = 10, fig.height = 10}
-pdf('Figures/FigureS12.pdf', width = 10, height = 10)
+pdf('Figures/FigureS13.pdf', width = 10, height = 10)
 get_corrplot_all(res_nigeria)
 dev.off()
 get_corrplot_all(res_nigeria)
@@ -1288,7 +1396,7 @@ get_corrplot_all(res_nigeria)
 
 ### India
 ```{r, fig.width = 10, fig.height = 10}
-pdf('Figures/FigureS13.pdf', width = 10, height = 10)
+pdf('Figures/FigureS14.pdf', width = 10, height = 10)
 get_corrplot_all(res_india)
 dev.off()
 get_corrplot_all(res_india)
